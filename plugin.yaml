@@ -1,0 +1,45 @@
+schema: mcpg.dev/plugin/v1
+id: dev.mcpg.backend.oracle
+name: Oracle Binding
+license: BUSL-1.1
+description: |
+  Runs a parameterised Oracle SQL / PL-SQL statement as MCP tools and
+  resources. The query uses `:1, :2, …` positional placeholders bound from
+  `params` — an ordered list of CEL expressions evaluated against the tool
+  arguments. Values are bound as SQL parameters (never string-interpolated),
+  so caller input cannot alter the statement (injection-safe). Connections use
+  rust-oracle / ODPI-C (the Oracle Instant Client is loaded at runtime); the
+  login password resolves through the gateway secret-resolver
+  (`${env.X}` / `vault://...`). `op: query` returns rows; `op: execute`
+  returns rows-affected.
+
+  Under `resource_templates[]` with `surface: resource` and a `uri_template`
+  (e.g. `oracle://orders/{id}`), a `read_query` performs a per-`{id}` single-row
+  read: the gateway extracts each `{var}` into `arguments.<var>`, which `params`
+  bind to the `read_query`'s `:1, :2, …` placeholders SERVER-SIDE (never
+  interpolated — injection-safe). `read_query` is operator-fixed, held to the
+  read-only keyword guard (SELECT / WITH), and may stand in for `query`.
+
+  Set `operation: list_tables` / `list_columns` for schema discovery: the
+  binding introspects Oracle's data dictionary (`ALL_TABLES` /
+  `ALL_TAB_COLUMNS`, the views visible to the connected user — no `DBA_*`
+  privilege). Optional `owner` / `table` filters (static, or per-call via
+  `owner_arg` / `table_arg`) are bound as `:owner` / `:tbl` SQL parameters,
+  never interpolated. The catalog operations are inherently read-only metadata
+  reads and ignore `op` / `params`.
+
+  A second `watch_strategy` entity (kind `oracle_poll`) lets a resource
+  subscribe to Oracle changes by POLLING. Each watcher carries its own
+  connection (`dsn` / `username` / `password`) plus a read-only scalar
+  high-water `tracking_query` (e.g. `SELECT max(updated_at) FROM events`). The
+  plugin runs that query every `interval_ms` (default 60000, floored at 250 ms)
+  with a per-tick `timeout_ms` budget (default 10000), and emits
+  `notifications/resources/updated` whenever the scalar advances past the
+  previously-seen value (the first tick only establishes the baseline, so a
+  watcher never fires spuriously at startup). The `tracking_query` is held to a
+  read-only keyword guard (SELECT / WITH); an empty or non-read-only query, or a
+  per-caller `cred://` password, is rejected at watch start.
+class: backend
+runtime: native-cdylib-v1
+protocol_version: "1.0"
+required_capabilities: [network_outbound]

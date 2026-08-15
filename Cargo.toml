@@ -1,0 +1,61 @@
+[package]
+name = "mcpg-plugin-backend-oracle"
+version = "0.1.0-alpha.15"
+license = "BUSL-1.1"
+edition = "2024"
+description = """
+Oracle Database backend binding plugin for mcpg. Runs a parameterised SQL /
+PL-SQL statement as MCP tools/resources — `:1, :2, …` placeholder values are
+CEL-computed from the tool arguments and bound as SQL parameters (never
+string-interpolated, so injection-safe). Connections use rust-oracle / ODPI-C
+(the Oracle Instant Client is loaded at runtime); the login password resolves
+through the gateway secret-resolver (`${env.X}` / `vault://`). Complements the
+`sql` (Postgres/MySQL/SQLite) and `mssql` backends, which their drivers can't
+speak to Oracle.
+"""
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+cdylib-export = []
+static-firstparty = []
+# Gates the docker-backed Oracle integration suite so plain `cargo test` stays
+# cheap (and needs no Instant Client). Run:
+# `cargo test -p mcpg-plugin-backend-oracle --features integration-tests`.
+integration-tests = []
+
+[dependencies]
+mcpg-plugin-protocol = { git = "https://github.com/mcpg-dev/mcpg-plugin-protocol", tag = "v0.1.0-beta.13", version = "=0.1.0-beta.13" }
+mcpg-plugin-sdk      = { git = "https://github.com/mcpg-dev/mcpg-plugin-sdk", tag = "v0.1.0-beta.13", version = "=0.1.0-beta.13", features = ["static-firstparty"] }
+mcpg-plugin-host     = { git = "https://github.com/mcpg-dev/mcpg-plugin-host", tag = "v0.1.0-beta.13", version = "=0.1.0-beta.13" }
+async-trait    = "0.1"
+base64         = "0.22"
+# CEL for computed query parameters (mirrors the sql/mssql backends' params).
+cel            = "0.13"
+chrono         = { version = "0.4", features = ["clock"] }
+# Lazy per-binding connection pool (mirrors the mssql backend). The pool is
+# built at register_profile but opens NO connection until the first `pool.get()`
+# in `execute`, so register stays I/O-free (no Oracle Instant Client needed to
+# compile / unit-test).
+deadpool       = "0.13"
+metrics        = "0.24"
+# Oracle driver. Wraps ODPI-C (vendored C, built by the crate — needs only a C
+# compiler at build time, NOT the Oracle Instant Client). ODPI-C dlopen's the
+# Oracle Client library (`libclntsh`) at RUNTIME, so this crate compiles and
+# unit-tests with no Instant Client installed; only an actual connection needs
+# it. License UPL-1.0 OR Apache-2.0 (resolves to Apache-2.0). No openssl /
+# native-tls / rustls dep — Oracle TLS lives in the C client layer.
+oracle         = "0.6.3"
+serde          = { version = "1", features = ["derive"] }
+serde_json     = "1"
+tokio          = { version = "1", features = ["sync", "rt", "rt-multi-thread", "macros", "time"] }
+tracing        = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }
+async-trait = "0.1"
+# Docker-backed Oracle integration test (async runner). Dev-dep only.
+testcontainers = "0.27"
+
